@@ -316,7 +316,7 @@ class Snaffle(GameUnit):
     def __init__(self, uid, x, y, vx, vy, state):
         super().__init__(uid, x, y, vx, vy, state)
         self.mass = 0.5
-        self.radius = 0
+        self.radius = 150
 
 class Bludger(GameUnit):
     def __init__(self, uid, x, y, vx, vy, state):
@@ -363,27 +363,27 @@ class Match():
         self.all_units = dict()
     
     def __str__(self):
-        s = f"Round {self.rounds}\n"
-        # s += f"Me: {self.my_score} ({self.my_magic})\n"
-        # s += f"Opp: {self.opp_score} ({self.opp_magic})\n"
-        # s += f"My wizz1:\n {self.my_wizz1}\n"
-        # s += f"My wizz2:\n {self.my_wizz2}\n"
-        # s += f"Opp wizz1:\n {self.opp_wizz1}\n"
-        # s += f"Opp wizz2:\n {self.opp_wizz2}\n"
-        # n = len(self.snaffles)
-        # s += f"Snaffles: {n}\n"
-        # # for k, val in self.snaffles.items():
-        # #     s += f"{val}\n"
-        s += "Bludgers\n"
-        for k, val in self.bludgers.items():
-            s += f"{val}\n"
+        s = f"Round {self.rounds}"
+        # # s += f"Me: {self.my_score} ({self.my_magic})\n"
+        # # s += f"Opp: {self.opp_score} ({self.opp_magic})\n"
+        # # s += f"My wizz1:\n {self.my_wizz1}\n"
+        # # s += f"My wizz2:\n {self.my_wizz2}\n"
+        # # s += f"Opp wizz1:\n {self.opp_wizz1}\n"
+        # # s += f"Opp wizz2:\n {self.opp_wizz2}\n"
+        # # n = len(self.snaffles)
+        # # s += f"Snaffles: {n}\n"
+        # # # for k, val in self.snaffles.items():
+        # # #     s += f"{val}\n"
+        # s += "Bludgers\n"
+        # for k, val in self.bludgers.items():
+        #     s += f"{val}\n"
             
-        # s += f"W1 {self.my_wizz1.role}:\n"
-        # s += f"SP: {self.my_wizz1.sector_pref}\n"
-        # s += f"AIM ID: {self.my_wizz1.aim_id}\n"
-        # s += f"W2 {self.my_wizz2.role}\n"
-        # s += f"SP: {self.my_wizz2.sector_pref}\n"
-        # s += f"AIM ID: {self.my_wizz2.aim_id}\n"
+        # # s += f"W1 {self.my_wizz1.role}:\n"
+        # # s += f"SP: {self.my_wizz1.sector_pref}\n"
+        # # s += f"AIM ID: {self.my_wizz1.aim_id}\n"
+        # # s += f"W2 {self.my_wizz2.role}\n"
+        # # s += f"SP: {self.my_wizz2.sector_pref}\n"
+        # # s += f"AIM ID: {self.my_wizz2.aim_id}\n"
         return s
     
     def initialize(self):
@@ -419,14 +419,15 @@ class Match():
         print(f"Target SCORE: {self.target_score}", file=sys.stderr)
     
     def update(self):
-        if self.my_wizz1 and self.my_wizz2 and self.my_wizz1.uid > self.my_wizz2.uid:
-            self.my_wizz1, self.my_wizz2 = self.my_wizz2, self.my_wizz1
-            print("My Wizzards UID SWAP!", file=sys.stderr)
+        # if self.my_wizz1 and self.my_wizz2 and self.my_wizz1.uid > self.my_wizz2.uid:
+        #     self.my_wizz1, self.my_wizz2 = self.my_wizz2, self.my_wizz1
+        #     print("My Wizzards UID SWAP!", file=sys.stderr)
         self.rounds -= 1
         self.my_score, self.my_magic = [int(i) for i in input().split()]
         self.opp_score, self.opp_magic = [int(i) for i in input().split()]
         entities = int(input())  # number of entities still in game
         current_snaffles = list()
+        # print(f"no ent: {entities}", file=sys.stderr)
         for i in range(entities):
             entity_id, entity_type, x, y, vx, vy, state = input().split()
             uid = int(entity_id)
@@ -435,6 +436,8 @@ class Match():
             vx = int(vx)
             vy = int(vy)
             state = int(state)
+            # print(f"Updating unit {entity_type} {uid}", file=sys.stderr)
+            # print(f"({x}, {y}) | ({vx}, {vy}) | {state}", file=sys.stderr)
             if entity_type == "WIZARD":
                 self.update_mywizz(uid, x, y, vx, vy, state)
             elif entity_type == "OPPONENT_WIZARD":
@@ -515,7 +518,8 @@ class Match():
                     sc[k] += right
                     right += 1
             return sc
-                
+        
+        print(f"STRAT START", file=sys.stderr)
         if len(self.snaffles) == 1:
             a = next(iter(self.snaffles.keys()))
             self.my_wizz1.aim_id = a
@@ -584,6 +588,7 @@ class Match():
                     fluency_2 += 1
             
             data[key] = {'w1' : w1, 'w1_d' : w1_dist,'w1_vec' : w1_vec, 'w2' : w2, 'w2_d' : w2_dist,'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl1': fluency_1, 'fl2': fluency_2, 'mci':mci}
+        print(data, file=sys.stderr)
         score = dict()
         for key in self.snaffles.keys():
             score[key] = 0
@@ -787,17 +792,17 @@ class Match():
         def pass_snaffle(wizz, other_wizz, aim, uid, force=500):
             naim = pass_aim(wizz, other_wizz)
             nv = self.snaffles[uid].new_vector(naim, force)
-            col, b_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 5, force)
-            if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 5, 500)
-                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
+            col, b_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 10, force)
+            if not col:
+                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 10, 500)
+                if not col:
                     wizz.talk = "PASSING"
                     return True, naim
             return False, aim
         
         def check_for_pass(wizz, other_wizz, aim, uid, reach):
             suc = False
-            if distance(wizz.loc, other_wizz.loc) < reach:
+            if distance(wizz.loc, other_wizz.loc) < reach and distance(self.my_goal_loc, wizz.loc) > 4000:
                 suc, aim = pass_snaffle(wizz, other_wizz, aim, uid)
             if suc:
                 print(f"THROW {aim[0]} {aim[1]} {force} {wizz.talk}")
@@ -810,10 +815,10 @@ class Match():
             def bounce(wizz, uid, bonds):
                 aim = get_aim(multiply_vector(wizz.vec, 1/0.75), bonds)
                 nv = self.snaffles[uid].new_vector(aim, 500)
-                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 5, 500)
-                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                    col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 5, 500)
-                    if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
+                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 8, 500)
+                if not col:
+                    col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 8, 500)
+                    if col and abs(ang) > math.pi / 4:
                         return False, None
                 return True, aim
             
@@ -844,9 +849,9 @@ class Match():
             rnds = 10
             nv = self.snaffles[uid].new_vector(aim, force)
             col, w_uid, r, ang,cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, rnds, force)
-            if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
+            if not col or abs(ang) < math.pi / 4:
                 col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, rnds, force)
-                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
+                if not col or abs(ang) < math.pi / 4:
                     return True
             return False
 
@@ -880,7 +885,7 @@ class Match():
         if abs(wizz.loc[0] - self.enemy_goal)  > abs(other_wizz.loc[0] - self.enemy_goal) and check_for_pass(wizz, other_wizz, aim, uid, 2600):
             return
         col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 12, force)
-        if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
+        if col and abs(ang) > math.pi / 4:
             # Check for other goal's locations
             print(f"CW! S{uid} & OW{w_uid} in {r}, {ang:.2f}", file = sys.stderr)
             if check_for_pass(wizz, other_wizz, aim, uid, 3200):
@@ -888,7 +893,7 @@ class Match():
             if bounce_wall(wizz, uid):
                 return
         col, b_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 12)
-        if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
+        if col and abs(ang) > math.pi / 4:
             print(f"CW! S{uid} & BL{b_uid} in {r}, {ang:.2f}", file = sys.stderr)
             if check_for_pass(wizz, other_wizz, aim, uid, 3200):
                 return
