@@ -621,6 +621,23 @@ class Match():
                 sc += 1
             return score
         
+        def majority_score(data, score_board, close_to_mine, left, maj):
+            right = maj - left
+            left *= -1
+            sc = score_board.copy()
+            snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][close_to_mine]))
+            for k in snaffs:
+                if data[k]['mci']:
+                    sc[k] += left 
+                    left += 1
+                    if left ==0:
+                        left += maj
+                else:
+                    sc[k] += right
+                    right += 1
+            return sc
+                
+        
         if len(self.snaffles) == 1:
             a = next(iter(self.snaffles.keys()))
             self.my_wizz1.aim_id = a
@@ -631,6 +648,12 @@ class Match():
         data = dict()
         op_side = 0
         my_side = 0
+        if distance(self.my_wizz1.loc, self.my_goal_loc) < distance(self.my_wizz2.loc, self.my_goal_loc):
+            my_wizz_goal_d = distance(self.my_wizz1.loc, self.my_goal_loc)
+            closer = 'w1'
+        else:
+            my_wizz_goal_d = distance(self.my_wizz2.loc, self.my_goal_loc)
+            closer = 'w2'
         for key, val in self.snaffles.items():
             # Distance from my wizzs
             w1_dist, w1_rounds, w1_vec = self.my_wizz1.get_estimates(val)
@@ -644,10 +667,13 @@ class Match():
             # Distance from goals
             my_goal_dist = max(distance(self.my_goal_loc, val.loc), 1)
             op_goal_dist = distance(self.en_goal_loc, val.loc)
-            if my_goal_dist < op_goal_dist:
+            if my_goal_dist < my_wizz_goal_d:
                 my_side += 1
+                # Majority Coeficient indicator
+                mci = 1
             else:
                 op_side += 1
+                mci = 0
             goal_ratio = op_goal_dist / my_goal_dist
             # Clustering
             clust = 0
@@ -666,7 +692,7 @@ class Match():
                     x = self.snaffles[f].loc[0]
                     y = self.snaffles[f].loc[1]
                     fluency += 1
-            data[key] = {'w1' : w1, 'w1_vec' : w1_vec, 'w2' : w2, 'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency}
+            data[key] = {'w1' : w1, 'w1_vec' : w1_vec, 'w2' : w2, 'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency, 'mci':mci}
         score = dict()
         for key in self.snaffles.keys():
             score[key] = 0
@@ -676,10 +702,13 @@ class Match():
         score = score_ascending('fl', data, score)
         w1_sc = score_ascending('w1', data, score)
         w2_sc = score_ascending('w2', data, score)
-        print(f"W1 SCORE: {w1_sc}", file=sys.stderr)
-        print(f"W2 SCORE: {w2_sc}", file=sys.stderr)
         n = self.target_score - self.my_score
-        # if 
+        if n > op_side:
+            print("Adjusting for majority)", file=sys.stderr)
+            w1_sc = majority_score(data, w1_sc, closer, n - op_side, n)
+            w2_sc = majority_score(data, w2_sc, closer, n - op_side, n)
+        print(f"W1 SCORE: {w1_sc}", file=sys.stderr)
+        print(f"W2 SCORE: {w2_sc}", file=sys.stderr) 
         w1_que = sorted(w1_sc.keys(), key=(lambda k: w1_sc[k]))
         best = w1_que[0]
         best_d = data[best]['w1']
