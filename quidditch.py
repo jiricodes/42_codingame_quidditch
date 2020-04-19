@@ -606,6 +606,7 @@ class Match():
         def score_ascending(key, data, scb):
             score = scb.copy()
             snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][key]))
+            print(f"Score \'{key}\': {snaffs}", file=sys.stderr)
             sc = 1
             for sn in snaffs:
                 score[sn] += sc
@@ -615,6 +616,7 @@ class Match():
         def score_descending(key, data, score_board):
             score = score_board.copy()
             snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][key]), reverse=True)
+            print(f"Score \'{key}\': {snaffs}", file=sys.stderr)
             sc = 1
             for sn in snaffs:
                 score[sn] += sc
@@ -624,20 +626,21 @@ class Match():
         def majority_score(data, score_board, close_to_mine, left, maj):
             right = maj - left
             left *= -1
+            importancy_ratio = 5
             sc = score_board.copy()
             snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][close_to_mine]))
             for k in snaffs:
                 if data[k]['mci']:
-                    sc[k] += left 
+                    sc[k] += (left * importancy_ratio) 
                     left += 1
                     if left ==0:
                         left += maj
+                        importancy_ratio = 1
                 else:
                     sc[k] += right
                     right += 1
             return sc
                 
-        
         if len(self.snaffles) == 1:
             a = next(iter(self.snaffles.keys()))
             self.my_wizz1.aim_id = a
@@ -658,8 +661,10 @@ class Match():
             # Distance from my wizzs
             w1_dist, w1_rounds, w1_vec = self.my_wizz1.get_estimates(val)
             w2_dist, w2_rounds, w2_vec = self.my_wizz2.get_estimates(val)
-            w1 = w1_dist + w1_rounds * 150
-            w2 = w2_dist + w2_rounds * 150
+            # w1 = w1_dist + w1_rounds * 150
+            # w2 = w2_dist + w2_rounds * 150
+            w1 = w1_rounds
+            w2 = w2_rounds
             # Closest enemy
             op_w1_dist, op_w1_rounds, dump = self.opp_wizz1.get_estimates(val)
             op_w2_dist, op_w2_rounds, dump = self.opp_wizz2.get_estimates(val)
@@ -692,17 +697,18 @@ class Match():
                     x = self.snaffles[f].loc[0]
                     y = self.snaffles[f].loc[1]
                     fluency += 1
-            data[key] = {'w1' : w1, 'w1_vec' : w1_vec, 'w2' : w2, 'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency, 'mci':mci}
+            data[key] = {'w1' : w1, 'w1_d' : w1_dist,'w1_vec' : w1_vec, 'w2' : w2, 'w2_d' : w2_dist,'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency, 'mci':mci}
         score = dict()
         for key in self.snaffles.keys():
             score[key] = 0
         score = score_descending('op', data, score)
         score = score_ascending('gr', data, score)
-        score = score_ascending('cl', data, score)
-        score = score_ascending('fl', data, score)
+        score = score_descending('cl', data, score)
+        score = score_descending('fl', data, score)
         w1_sc = score_ascending('w1', data, score)
         w2_sc = score_ascending('w2', data, score)
         n = self.target_score - self.my_score
+        print(f"n = {n} | balance {my_side} - {op_side}", file=sys.stderr)
         if n > op_side:
             print("Adjusting for majority)", file=sys.stderr)
             w1_sc = majority_score(data, w1_sc, closer, n - op_side, n)
@@ -710,36 +716,63 @@ class Match():
         print(f"W1 SCORE: {w1_sc}", file=sys.stderr)
         print(f"W2 SCORE: {w2_sc}", file=sys.stderr) 
         w1_que = sorted(w1_sc.keys(), key=(lambda k: w1_sc[k]))
-        best = w1_que[0]
-        best_d = data[best]['w1']
-        for k in w1_que:
-            if w1_sc[best] == w1_sc[k] and data[k]['w1'] < data[best]['w1']:
-                best = k
-                best_d = data[k]['w1']
-            elif w1_sc[best] < w1_sc[k]:
-                break
-        self.my_wizz1.aim_id = best
-        self.my_wizz1.aim_vec = data[best]['w1_vec']
+        self.select_target('w1', data, w1_sc, w1_que)
         w2_que = sorted(w2_sc.keys(), key=(lambda k: w2_sc[k]))
-        best = w2_que[0]
-        if best == self.my_wizz1.aim_id and n != 1:
-            best = w2_que[1]
-        best_d = data[best]['w2']
-        for k in w2_que:
-            if w2_sc[best] == w2_sc[k] and data[k]['w2'] < data[best]['w2']:
-                best = k
-                best_d = data[k]['w2']
-            elif w2_sc[best] < w2_sc[k]:
-                break
-        self.my_wizz2.aim_id = best
-        self.my_wizz2.aim_vec = data[best]['w2_vec']
+        self.select_target('w2', data, w2_sc, w2_que)
+        
         # Check if swap needed
-        if w2_sc[self.my_wizz1.aim_id] < w1_sc[self.my_wizz1.aim_id] and w1_sc[self.my_wizz2.aim_id] <= w2_sc[self.my_wizz2.aim_id]:
-            self.my_wizz1.aim_id, self.my_wizz2.aim_id = self.my_wizz2.aim_id, self.my_wizz1.aim_id
-            self.my_wizz1.aim_vec, self.my_wizz2.aim_vec = self.my_wizz2.aim_vec, self.my_wizz1.aim_vec
+        if self.check_target_swap(data):
+            self.select_target('w2', data, w2_sc, w2_que)
+            self.select_target('w1', data, w1_sc, w1_que) 
+        
+        
         print(f"Wizz 1 aim: Snaffle {self.my_wizz1.aim_id}", file=sys.stderr)
         print(f"Wizz 2 aim: Snaffle {self.my_wizz2.aim_id }", file=sys.stderr)
 
+    def select_target(self, wizz, data, score_board, priority):
+        n = self.target_score - self.my_score
+        if wizz == 'w1':
+            other = 'w2'
+            to_assign =  self.my_wizz1
+            other_wizz = self.my_wizz2
+        else:
+            other = 'w1'
+            to_assign =  self.my_wizz2
+            other_wizz = self.my_wizz1
+        
+        best = priority[0]
+        if best == other_wizz.aim_id:
+            best = priority[1]
+        best_d = data[best][wizz]
+        for k in priority:
+            if score_board[best] == score_board[k] and data[k][wizz] < data[best][wizz] and (k != other_wizz.aim_id or n == 1):
+                best = k
+                best_d = data[k][wizz]
+            elif score_board[best] < score_board[k]:
+                break
+        to_assign.aim_id = best
+        to_assign.aim_vec = data[best][f'{wizz}_vec']
+
+    def check_target_swap(self, data):
+        w1 = self.my_wizz1
+        w2 = self.my_wizz2
+        wd1 = data[w1.aim_id]['w1'] * 150 + data[w1.aim_id]['w1_d']
+        wd2 = data[w2.aim_id]['w2'] * 150 + data[w2.aim_id]['w2_d']
+        #Cross Distance
+        wd1_2 = data[w2.aim_id]['w1']
+        wd2_1 = data[w1.aim_id]['w2']
+        if w1.aim_id == w2.aim_id:
+            if wd2 > wd1 and wd1 < 1800:
+                w2.aim_id = None
+            elif wd2 < wd1 and wd2 < 1800:
+                w1.aim_id = None
+        elif wd2 > 1000 and wd1 > 1000 and (wd1_2 < wd2 or wd2_1 < wd1):
+            print(f"Swapping Targets {w1.aim_id}<->{w2.aim_id}", file=sys.stderr)
+            w1.aim_id = None
+            w2.aim_id = None
+            return True
+        return False
+    
     def turn(self):
         self.strat_desirability()
         # if self.rounds > 190:
