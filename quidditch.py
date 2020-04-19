@@ -353,10 +353,14 @@ class Match():
         self.rounds = 200
         if team_id:
             self.my_goal = 16000
+            self.my_goal_loc = (16000, 3750)
+            self.en_goal_loc = (0, 3750)
             self.enemy_goal = 0
             self.enemy_goal_spots = [(0, 3750), (0, 5380), (0, 2120)]
         else:
             self.my_goal = 0
+            self.my_goal_loc = (0, 3750)
+            self.en_goal_loc = (16000, 3750)
             self.enemy_goal = 16000
             self.enemy_goal_spots = [(16000, 3750), (16000, 5380), (16000, 2120)]
         self.goal_y = (2120, 5380)
@@ -592,41 +596,157 @@ class Match():
         for key in to_target2.keys():
             self.target_snaffles_2[key] = self.snaffles[key]
 
+    def strat_desirability(self):
+        def next_fluent(x, y):
+            for key, val in self.snaffles.items():
+                if abs(self.enemy_goal - val.loc[0]) < abs(self.enemy_goal - x) and abs(x - val.loc[0]) < fluency_axis_dist and abs(y - val.loc[1]) < fluency_axis_dist:
+                        return key
+            return None
+        
+        def score_ascending(key, data, scb):
+            score = scb.copy()
+            snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][key]))
+            sc = 1
+            for sn in snaffs:
+                score[sn] += sc
+                sc += 1
+            return score
+
+        def score_descending(key, data, score_board):
+            score = score_board.copy()
+            snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][key]), reverse=True)
+            sc = 1
+            for sn in snaffs:
+                score[sn] += sc
+                sc += 1
+            return score
+        
+        if len(self.snaffles) == 1:
+            a = next(iter(self.snaffles.keys()))
+            self.my_wizz1.aim_id = a
+            self.my_wizz2.aim_id = a
+            return
+        cluster_distance = 2500
+        fluency_axis_dist = ((cluster_distance ** 2) / 2) ** 0.5
+        data = dict()
+        op_side = 0
+        my_side = 0
+        for key, val in self.snaffles.items():
+            # Distance from my wizzs
+            w1_dist, w1_rounds, w1_vec = self.my_wizz1.get_estimates(val)
+            w2_dist, w2_rounds, w2_vec = self.my_wizz2.get_estimates(val)
+            w1 = w1_dist + w1_rounds * 150
+            w2 = w2_dist + w2_rounds * 150
+            # Closest enemy
+            op_w1_dist, op_w1_rounds, dump = self.opp_wizz1.get_estimates(val)
+            op_w2_dist, op_w2_rounds, dump = self.opp_wizz2.get_estimates(val)
+            op_score = min(op_w1_dist + op_w1_rounds * 150, op_w2_dist + op_w2_rounds * 150)
+            # Distance from goals
+            my_goal_dist = max(distance(self.my_goal_loc, val.loc), 1)
+            op_goal_dist = distance(self.en_goal_loc, val.loc)
+            if my_goal_dist < op_goal_dist:
+                my_side += 1
+            else:
+                op_side += 1
+            goal_ratio = op_goal_dist / my_goal_dist
+            # Clustering
+            clust = 0
+            for k2, v2 in self.snaffles.items():
+                if v2.uid != val.uid:
+                    if distance(v2.loc, val.loc) < cluster_distance:
+                        clust += 1
+            # Fluency
+            fluency = 0
+            x = val.loc[0]
+            y = val.loc[1]
+            f = 1
+            while f:
+                f = next_fluent(x, y)
+                if f:
+                    x = self.snaffles[f].loc[0]
+                    y = self.snaffles[f].loc[1]
+                    fluency += 1
+            data[key] = {'w1' : w1, 'w1_vec' : w1_vec, 'w2' : w2, 'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency}
+        score = dict()
+        for key in self.snaffles.keys():
+            score[key] = 0
+        score = score_descending('op', data, score)
+        score = score_ascending('gr', data, score)
+        score = score_ascending('cl', data, score)
+        score = score_ascending('fl', data, score)
+        w1_sc = score_ascending('w1', data, score)
+        w2_sc = score_ascending('w2', data, score)
+        print(f"W1 SCORE: {w1_sc}", file=sys.stderr)
+        print(f"W2 SCORE: {w2_sc}", file=sys.stderr)
+        n = self.target_score - self.my_score
+        # if 
+        w1_que = sorted(w1_sc.keys(), key=(lambda k: w1_sc[k]))
+        best = w1_que[0]
+        best_d = data[best]['w1']
+        for k in w1_que:
+            if w1_sc[best] == w1_sc[k] and data[k]['w1'] < data[best]['w1']:
+                best = k
+                best_d = data[k]['w1']
+            elif w1_sc[best] < w1_sc[k]:
+                break
+        self.my_wizz1.aim_id = best
+        self.my_wizz1.aim_vec = data[best]['w1_vec']
+        w2_que = sorted(w2_sc.keys(), key=(lambda k: w2_sc[k]))
+        best = w2_que[0]
+        if best == self.my_wizz1.aim_id and n != 1:
+            best = w2_que[1]
+        best_d = data[best]['w2']
+        for k in w2_que:
+            if w2_sc[best] == w2_sc[k] and data[k]['w2'] < data[best]['w2']:
+                best = k
+                best_d = data[k]['w2']
+            elif w2_sc[best] < w2_sc[k]:
+                break
+        self.my_wizz2.aim_id = best
+        self.my_wizz2.aim_vec = data[best]['w2_vec']
+        # Check if swap needed
+        if w2_sc[self.my_wizz1.aim_id] < w1_sc[self.my_wizz1.aim_id] and w1_sc[self.my_wizz2.aim_id] <= w2_sc[self.my_wizz2.aim_id]:
+            self.my_wizz1.aim_id, self.my_wizz2.aim_id = self.my_wizz2.aim_id, self.my_wizz1.aim_id
+            self.my_wizz1.aim_vec, self.my_wizz2.aim_vec = self.my_wizz2.aim_vec, self.my_wizz1.aim_vec
+        print(f"Wizz 1 aim: Snaffle {self.my_wizz1.aim_id}", file=sys.stderr)
+        print(f"Wizz 2 aim: Snaffle {self.my_wizz2.aim_id }", file=sys.stderr)
+
     def turn(self):
-        if self.rounds > 190:
-            self.strat_snaffles()
-        else:
-            self.strat_snaffles2()
-        print(f"TARGET W1: {self.target_snaffles_1.keys()}", file=sys.stderr)
-        print(f"TARGET W2: {self.target_snaffles_2.keys()}", file=sys.stderr)
-        if not self.my_wizz1.aim_id in self.target_snaffles_1:
-            self.my_wizz1.aim_id = None
-        if not self.my_wizz2.aim_id in self.target_snaffles_2:
-            self.my_wizz2.aim_id = None
-        wb1, wd1, wr1 = self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
-        wb2, wd2, wr2 = self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
+        self.strat_desirability()
+        # if self.rounds > 190:
+        #     self.strat_snaffles()
+        # else:
+        #     self.strat_snaffles2()
+        # print(f"TARGET W1: {self.target_snaffles_1.keys()}", file=sys.stderr)
+        # print(f"TARGET W2: {self.target_snaffles_2.keys()}", file=sys.stderr)
+        # if not self.my_wizz1.aim_id in self.target_snaffles_1:
+        #     self.my_wizz1.aim_id = None
+        # if not self.my_wizz2.aim_id in self.target_snaffles_2:
+        #     self.my_wizz2.aim_id = None
+        # wb1, wd1, wr1 = self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
+        # wb2, wd2, wr2 = self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
         # print(f"W1-S{self.my_wizz1.aim_id}: {wd1:.2f} | {wr1:.2f}\nW2-S{self.my_wizz2.aim_id}: {wd2:.2f} | {wr2:.2f}", file=sys.stderr)
-        w1_wb2_d = distance(self.my_wizz1.loc, wb2.loc)
-        w1_wb2_r, loc1 = simulate_move(self.my_wizz1, wb2, 150, 50)
-        w1_wb2_r *= 150
-        w2_wb1_d = distance(self.my_wizz2.loc, wb1.loc)
-        w2_wb1_r, loc2 = simulate_move(self.my_wizz2, wb1, 150, 50)
-        w2_wb1_r *= 150
+        # w1_wb2_d = distance(self.my_wizz1.loc, wb2.loc)
+        # w1_wb2_r, loc1 = simulate_move(self.my_wizz1, wb2, 150, 50)
+        # w1_wb2_r *= 150
+        # w2_wb1_d = distance(self.my_wizz2.loc, wb1.loc)
+        # w2_wb1_r, loc2 = simulate_move(self.my_wizz2, wb1, 150, 50)
+        # w2_wb1_r *= 150
         # print(f"W1-S{self.my_wizz2.aim_id}: {w1_wb2_d:.2f} | {w1_wb2_r:.2f}", file=sys.stderr)
         # print(f"W2-S{self.my_wizz1.aim_id}: {w2_wb1_d:.2f} | {w2_wb1_r:.2f}", file=sys.stderr)
-        if wb1 and wb2:
-            if wb1.uid == wb2.uid:
-                if wd2 + wr2 > wd1 + wr1 and wd1 < 1800:
-                    self.my_wizz2.aim_id = None
-                elif wd2 + wr2 < wd1 + wr1 and wd2 < 1800:
-                    self.my_wizz1.aim_id = None
-            elif (w1_wb2_d + w1_wb2_r < wd2 + wr2 and wd2 > 650) or (w2_wb1_d + w2_wb1_r < wd1 + wr1 and wd1 > 650):
-                self.my_wizz1.aim_id = None
-                # self.my_wizz1.aim_vec = loc2
-                self.my_wizz2.aim_id = None
-                self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
-                self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
-            # if w2_wb1_d + w2_wb1_r < wd1 + wr1:
+        # if wb1 and wb2:
+        #     if wb1.uid == wb2.uid:
+        #         if wd2 + wr2 > wd1 + wr1 and wd1 < 1800:
+        #             self.my_wizz2.aim_id = None
+        #         elif wd2 + wr2 < wd1 + wr1 and wd2 < 1800:
+        #             self.my_wizz1.aim_id = None
+        #     elif (w1_wb2_d + w1_wb2_r < wd2 + wr2 and wd2 > 650) or (w2_wb1_d + w2_wb1_r < wd1 + wr1 and wd1 > 650):
+        #         self.my_wizz1.aim_id = None
+        #         # self.my_wizz1.aim_vec = loc2
+        #         self.my_wizz2.aim_id = None
+        #         self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
+        #         self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
+        #     # if w2_wb1_d + w2_wb1_r < wd1 + wr1:
             #     self.my_wizz2.aim_id = self.my_wizz1.aim_id
             #     self.my_wizz2.aim_vec = loc2
             #     self.my_wizz1.select_closest(self.target_snaffles, self.my_wizz2)
