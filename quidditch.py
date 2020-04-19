@@ -49,11 +49,8 @@ def vector_angle(v):
     return a
 
 def collision_angle(v1, v2):
-    print("Collision angle:", file=sys.stderr)
     a = vector_angle(normalize_vector(v1))
-    print(f"A: {a}({math.degrees(a)})", file=sys.stderr)
     b = vector_angle(normalize_vector(v2))
-    print(f"B: {b}({math.degrees(b)})", file=sys.stderr)
     return normalize_angle(b - a)
 
 def normalize_angle(angle):
@@ -237,8 +234,8 @@ class GameUnit():
                     break
                 # Avoiding only 1 object atm
                 md = min_dist(self_line, obj_line)
-                if md < 900:
-                    print(f"{self.uid} <-> {val.uid} at {rounds}: {md:.2f}", file=sys.stderr)
+                # if md < 900:
+                #     print(f"{self.uid} <-> {val.uid} at {rounds}: {md:.2f}", file=sys.stderr)
                 if segment_intersection(self_line, obj_line) or md < (self.radius + val.radius):
                     s = subtract_vectors(self_line[1], self_line[0])
                     o = subtract_vectors(obj_line[1], obj_line[0])
@@ -267,62 +264,47 @@ class Wizzard(GameUnit):
         self.talk = f"S{self.aim_id}"
     
     def move_to_object(self, dest, dest_vec, blud_dict, other_wiz):
+        def test_move(blud_dict, vector, max_detect=9):
+            col, uid, r, ang, cv = self.check_for_collision(blud_dict, vec, max_detect)
+            if col and r > 1 and abs(ang) > math.pi / 2:
+                 False
+            True
+
+        def adjust_move(aim, blud_dict, max_detect, limit=True):
+            step = 1 if limit else 5
+            bound = 90 if limit else 360
+            for i in range(0, bound // 2, step):
+                vector = vector_rotate(aim, math.radians(i))
+                if test_move(blud_dict, vector, max_detect):
+                    return True, vector
+                vector = vector_rotate(aim, math.radians(-i))
+                if test_move(blud_dict, vector, max_detect):
+                    return True, vector
+            return False, None
+            
         print(f"Moving W{self.uid} to {dest}", file=sys.stderr)
         thrust = 150
         max_detect = 9
         aim = get_aim(self.vec, dest, dest_vec)
         vec = self.new_vector(aim, 150)
-        col, uid, r, ang, cv = self.check_for_collision({other_wiz.uid: other_wiz}, vec, max_detect)
-        if col:
-            print(f"CW! W{self.uid} & W{uid} in {r}, {ang:.2f}", file = sys.stderr)
-            self.talk += f"|CW! W{uid}({r},{ang:.2f})"
+        # col, uid, r, ang, cv = self.check_for_collision({other_wiz.uid: other_wiz}, vec, max_detect)
+        # if col:
+        #     print(f"CW! W{self.uid} & W{uid} in {r}, {ang:.2f}", file = sys.stderr)
+        #     self.talk += f"|CW! W{uid}({r},{ang:.2f})"
         col, uid, r, ang, cv = self.check_for_collision(blud_dict, vec, max_detect)
-        if col:
+        if col and r > 1 and abs(ang) > math.pi / 2:
             ang_d = math.degrees(ang)
             print(f"CW! W{self.uid}({vec}) & BL {uid} in {r}, {ang:.2f}({ang_d:.2f}, {cv:.2f})", file = sys.stderr)
-        if col and r > 1 and abs(ang) > math.pi / 2:
-            self.talk += f"|CW! B{uid}({r})"
-            if ang > 0:
-                ang -= math.pi / 2
-            else:
-                ang += math.pi / 2
-            if abs(ang) < math.pi / 4:
-                ang = (-math.pi / 4 - ang) if ang < 0 else (math.pi / 4 - ang)
-            else:
-                ang = (math.pi / 4 + ang) if ang < 0 else (-math.pi / 4 + ang)
-            da = math.degrees(ang)
-            print(f"Trying to adjust course by {ang}({da})",file=sys.stderr)
-            aim = vector_rotate(aim, ang)
+            t, target = adjust_move(aim, blud_dict, max_detect)
+            if t:
+                
+                aim = target
         self.move(aim, thrust)
     
     def get_estimates(self, unit, rnd_limit=50):
         dist = distance(self.loc, unit.loc)
         rounds, final_vector = simulate_move(self, unit, self.thrust, rnd_limit)
         return dist, rounds, final_vector
-    
-    def select_closest(self, snaff_dict, other_wiz):
-        # print(f"Selection: W{self.uid}", file=sys.stderr)
-        rnd_limit = 50
-        best_r = rnd_limit * 150
-        best = None
-        best_d = sys.maxsize
-        if self.aim_id:
-            best = snaff_dict[self.aim_id]
-            best_d, best_r, self.aim_vec = self.get_estimates(snaff_dict[self.aim_id], rnd_limit)
-            best_r *= 150
-        for key, val in snaff_dict.items():
-            tmp, r, nv = self.get_estimates(val, rnd_limit)
-            r *= 150
-            # print(f"S{key}: {tmp:.2f} | {r}", file=sys.stderr)
-            # if tmp + r < best_d + best_r and (key != other_wiz.aim_id or len(snaff_dict) < 2):
-            if r < best_r and (key != other_wiz.aim_id or len(snaff_dict) < 2):
-                best_d = tmp
-                best_r = r
-                self.rounds_to_reach = r
-                best = val
-                self.aim_id = key
-                self.aim_vec = nv
-        return best, best_d, best_r
     
     def uid_holding(self, snaffs):
         for key, val in snaffs.items():
@@ -334,7 +316,7 @@ class Snaffle(GameUnit):
     def __init__(self, uid, x, y, vx, vy, state):
         super().__init__(uid, x, y, vx, vy, state)
         self.mass = 0.5
-        self.radius = 150
+        self.radius = 0
 
 class Bludger(GameUnit):
     def __init__(self, uid, x, y, vx, vy, state):
@@ -488,114 +470,6 @@ class Match():
         for key in to_rem:
             del self.snaffles[key]
     
-    def strat_snaffles(self):
-        def create_dict(wizzid):
-            result = dict()
-            if wizzid == 1:
-                wizz = self.my_wizz1
-            else:
-                wizz = self.my_wizz2
-            n = self.target_score - self.my_score
-            if n == len(self.snaffles):
-                result = self.snaffles
-                return result
-            loc = (self.enemy_goal, 3750)
-            w_g = distance(wizz.loc, loc)
-            to_target = dict()
-            for key, val in self.snaffles.items():
-                d_g = distance(loc, val.loc)
-                w_d, w_r, fv = wizz.get_estimates(val)
-                cv = w_d + w_r * 150
-                if d_g < w_g or w_d < 1000:
-                    if len(to_target) < n:
-                        to_target[key] = cv
-                    else:
-                        key_max = max(to_target.keys(), key=(lambda k: to_target[k]))
-                        if cv < to_target[key_max]:
-                            del to_target[key_max]
-                            to_target[key] = cv
-            for key in to_target.keys():
-                result[key] = self.snaffles[key]
-            if len(result) < n:
-                to_target = dict()
-                for key, val in self.snaffles.items():
-                    if not key in result.keys():
-                        w_d, w_r, fv = wizz.get_estimates(val)
-                        cv = w_d + w_r * 150
-                        if len(result) + len(to_target) < n:
-                            to_target[key] = cv
-                        else:
-                            key_max = max(to_target.keys(), key=(lambda k: to_target[k]))
-                            if cv < to_target[key_max]:
-                                del to_target[key_max]
-                                to_target[key] = cv
-                for key in to_target.keys():
-                    result[key] = self.snaffles[key]
-            return result
-        self.target_snaffles_1 = create_dict(1)
-        self.target_snaffles_2 = create_dict(2)
-        
-    def strat_snaffles2(self):
-        self.target_snaffles_1 = dict()
-        self.target_snaffles_2 = dict()
-        n = self.target_score - self.my_score
-        if n == len(self.snaffles):
-            self.target_snaffles_1 = self.snaffles
-            self.target_snaffles_2 = self.snaffles
-            return
-        my_side = dict()
-        en_side = dict()
-        my_goal = (self.my_goal, 3750)
-        en_goal = (self.enemy_goal, 3750)
-        for key, val in self.snaffles.items():
-            md = distance(val.loc, my_goal)
-            ed = distance(val.loc, en_goal)
-            if md < ed:
-                my_side[key] = md
-            else:
-                en_side[key] = ed
-        
-        if n == 1 and len(en_side):
-            key_min = min(en_side.keys(), key=(lambda k: en_side[k]))
-            self.target_snaffles_1[key_min] = self.snaffles[key_min]
-            self.target_snaffles_2[key_min] = self.snaffles[key_min]
-            return
-        elif n == 2 and len(en_side) < 2:
-            key_max = max(my_side.keys(), key=(lambda k: my_side[k]))
-            self.target_snaffles_1[key_max] = self.snaffles[key_max]
-        for k in en_side.keys():
-            self.target_snaffles_1[k] = self.snaffles[k]
-            self.target_snaffles_2[k] = self.snaffles[k]
-        if len(en_side) >= n:
-            return
-        else:
-            to_target1 = dict()
-            to_target2 = dict()
-            for key, val in self.snaffles.items():
-                if not key in en_side.keys():
-                    w_d, w_r, fv = self.my_wizz1.get_estimates(val)
-                    w1 = w_d + w_r * 150
-                    if len(en_side) + len(to_target1) < n:
-                        to_target1[key] = w1
-                    else:
-                        key_max = max(to_target1.keys(), key=(lambda k: to_target1[k]))
-                        if w1 < to_target1[key_max]:
-                            del to_target1[key_max]
-                            to_target1[key] = w1
-                    w_d, w_r, fv = self.my_wizz2.get_estimates(val)
-                    w2 = w_d + w_r * 150
-                    if len(en_side) + len(to_target2) < n:
-                        to_target2[key] = w2
-                    else:
-                        key_max = max(to_target2.keys(), key=(lambda k: to_target2[k]))
-                        if w2 < to_target2[key_max]:
-                            del to_target2[key_max]
-                            to_target2[key] = w2
-        for key in to_target1.keys():
-            self.target_snaffles_1[key] = self.snaffles[key]
-        for key in to_target2.keys():
-            self.target_snaffles_2[key] = self.snaffles[key]
-
     def strat_desirability(self):
         def next_fluent(x, y):
             for key, val in self.snaffles.items():
@@ -604,12 +478,13 @@ class Match():
             return None
         
         def score_ascending(key, data, scb):
+            ratio = 2 if (key=='w1' or key=='w2') else 1
             score = scb.copy()
             snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][key]))
             print(f"Score \'{key}\': {snaffs}", file=sys.stderr)
             sc = 1
             for sn in snaffs:
-                score[sn] += sc
+                score[sn] += sc * ratio
                 sc += 1
             return score
 
@@ -631,11 +506,11 @@ class Match():
             snaffs = sorted(self.snaffles.keys(), key=(lambda k: data[k][close_to_mine]))
             for k in snaffs:
                 if data[k]['mci']:
-                    sc[k] += (left * importancy_ratio) 
-                    left += 1
                     if left ==0:
                         left += maj
                         importancy_ratio = 1
+                    sc[k] += (left * importancy_ratio) 
+                    left += 1
                 else:
                     sc[k] += right
                     right += 1
@@ -687,32 +562,41 @@ class Match():
                     if distance(v2.loc, val.loc) < cluster_distance:
                         clust += 1
             # Fluency
-            fluency = 0
+            fluency_1 = 0
             x = val.loc[0]
             y = val.loc[1]
-            f = 1
+            f = 1 if distance(self.my_wizz1.loc, self.my_goal_loc) >= my_goal_dist else 0
             while f:
                 f = next_fluent(x, y)
                 if f:
                     x = self.snaffles[f].loc[0]
                     y = self.snaffles[f].loc[1]
-                    fluency += 1
-            data[key] = {'w1' : w1, 'w1_d' : w1_dist,'w1_vec' : w1_vec, 'w2' : w2, 'w2_d' : w2_dist,'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl': fluency, 'mci':mci}
+                    fluency_1 += 1
+            fluency_2 = 0
+            x = val.loc[0]
+            y = val.loc[1]
+            f = 1 if distance(self.my_wizz2.loc, self.my_goal_loc) >= my_goal_dist else 0
+            while f:
+                f = next_fluent(x, y)
+                if f:
+                    x = self.snaffles[f].loc[0]
+                    y = self.snaffles[f].loc[1]
+                    fluency_2 += 1
+            
+            data[key] = {'w1' : w1, 'w1_d' : w1_dist,'w1_vec' : w1_vec, 'w2' : w2, 'w2_d' : w2_dist,'w2_vec' : w2_vec, 'op': op_score, 'gr' : goal_ratio, 'cl' : clust, 'fl1': fluency_1, 'fl2': fluency_2, 'mci':mci}
         score = dict()
         for key in self.snaffles.keys():
             score[key] = 0
         score = score_descending('op', data, score)
         score = score_ascending('gr', data, score)
         score = score_descending('cl', data, score)
-        score = score_descending('fl', data, score)
+        w1_sc = score_descending('fl1', data, score)
+        w2_sc = score_descending('fl2', data, score)
         w1_sc = score_ascending('w1', data, score)
         w2_sc = score_ascending('w2', data, score)
         n = self.target_score - self.my_score
-        print(f"n = {n} | balance {my_side} - {op_side}", file=sys.stderr)
-        if n > op_side:
-            print("Adjusting for majority)", file=sys.stderr)
-            w1_sc = majority_score(data, w1_sc, closer, n - op_side, n)
-            w2_sc = majority_score(data, w2_sc, closer, n - op_side, n)
+        w1_sc = majority_score(data, w1_sc, closer, n - op_side, n)
+        w2_sc = majority_score(data, w2_sc, closer, n - op_side, n)
         print(f"W1 SCORE: {w1_sc}", file=sys.stderr)
         print(f"W2 SCORE: {w2_sc}", file=sys.stderr) 
         w1_que = sorted(w1_sc.keys(), key=(lambda k: w1_sc[k]))
@@ -775,48 +659,9 @@ class Match():
     
     def turn(self):
         self.strat_desirability()
-        # if self.rounds > 190:
-        #     self.strat_snaffles()
-        # else:
-        #     self.strat_snaffles2()
-        # print(f"TARGET W1: {self.target_snaffles_1.keys()}", file=sys.stderr)
-        # print(f"TARGET W2: {self.target_snaffles_2.keys()}", file=sys.stderr)
-        # if not self.my_wizz1.aim_id in self.target_snaffles_1:
-        #     self.my_wizz1.aim_id = None
-        # if not self.my_wizz2.aim_id in self.target_snaffles_2:
-        #     self.my_wizz2.aim_id = None
-        # wb1, wd1, wr1 = self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
-        # wb2, wd2, wr2 = self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
-        # print(f"W1-S{self.my_wizz1.aim_id}: {wd1:.2f} | {wr1:.2f}\nW2-S{self.my_wizz2.aim_id}: {wd2:.2f} | {wr2:.2f}", file=sys.stderr)
-        # w1_wb2_d = distance(self.my_wizz1.loc, wb2.loc)
-        # w1_wb2_r, loc1 = simulate_move(self.my_wizz1, wb2, 150, 50)
-        # w1_wb2_r *= 150
-        # w2_wb1_d = distance(self.my_wizz2.loc, wb1.loc)
-        # w2_wb1_r, loc2 = simulate_move(self.my_wizz2, wb1, 150, 50)
-        # w2_wb1_r *= 150
-        # print(f"W1-S{self.my_wizz2.aim_id}: {w1_wb2_d:.2f} | {w1_wb2_r:.2f}", file=sys.stderr)
-        # print(f"W2-S{self.my_wizz1.aim_id}: {w2_wb1_d:.2f} | {w2_wb1_r:.2f}", file=sys.stderr)
-        # if wb1 and wb2:
-        #     if wb1.uid == wb2.uid:
-        #         if wd2 + wr2 > wd1 + wr1 and wd1 < 1800:
-        #             self.my_wizz2.aim_id = None
-        #         elif wd2 + wr2 < wd1 + wr1 and wd2 < 1800:
-        #             self.my_wizz1.aim_id = None
-        #     elif (w1_wb2_d + w1_wb2_r < wd2 + wr2 and wd2 > 650) or (w2_wb1_d + w2_wb1_r < wd1 + wr1 and wd1 > 650):
-        #         self.my_wizz1.aim_id = None
-        #         # self.my_wizz1.aim_vec = loc2
-        #         self.my_wizz2.aim_id = None
-        #         self.my_wizz2.select_closest(self.target_snaffles_2, self.my_wizz1)
-        #         self.my_wizz1.select_closest(self.target_snaffles_1, self.my_wizz2)
-        #     # if w2_wb1_d + w2_wb1_r < wd1 + wr1:
-            #     self.my_wizz2.aim_id = self.my_wizz1.aim_id
-            #     self.my_wizz2.aim_vec = loc2
-            #     self.my_wizz1.select_closest(self.target_snaffles, self.my_wizz2)
         self.action_wizz1()
         self.action_wizz2()
-        # print(self, file=sys.stderr)
-        # self.my_wizz1.aim_id = None
-        # self.my_wizz2.aim_id = None
+
 
     def action_wizz1(self):
         if self.my_wizz1.state:
@@ -974,11 +819,11 @@ class Match():
             
             def upper(wizz, uid):
                 bonds = (round(wizz.loc[0] + (self.enemy_goal - wizz.loc[0]) / 2), 0)
-                return bounce(wizz, uid, bonds)    
+                return throw(wizz, uid, bonds, 500, 45)    
             
             def lower(wizz, uid):
                 bonds = (round(wizz.loc[0] + (self.enemy_goal - wizz.loc[0]) / 2), 7500)
-                return bounce(wizz, uid, bonds)
+                return throw(wizz, uid, bonds, 500, 45)
                 
             if wizz.loc[1] < 3750:
                 suc, aim = upper(wizz, uid)
@@ -994,36 +839,47 @@ class Match():
                 return True
             else:
                 return False
+        
+        def test_throw(aim, uid, force):
+            rnds = 10
+            nv = self.snaffles[uid].new_vector(aim, force)
+            col, w_uid, r, ang,cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, rnds, force)
+            if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
+                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, rnds, force)
+                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
+                    return True
+            return False
 
+        def throw(wizz, uid, towards, force, limit=None):
+            bound = 90 if not limit else limit
+            step = bound // 30
+            if not step:
+                step = 1
+            default = get_aim(wizz.vec, towards)
+            for i in range(0, bound // 2, step):
+                aim = vector_rotate(default, math.radians(i))
+                if test_throw(aim, uid, force):
+                    return True, aim
+                aim = vector_rotate(default, math.radians(-i))
+                if test_throw(aim, uid, force):
+                    return True, aim
+            return False, None
+            
         force = 500
         uid = wizz.uid_holding(self.snaffles)
         print(f"W2 holding S({uid})", file=sys.stderr)
         aim = get_aim(multiply_vector(wizz.vec, 1/0.75), (self.enemy_goal, 3750))
-        nv = self.snaffles[uid].new_vector(aim, 500)
+        nv = self.snaffles[uid].new_vector(aim, force)
         wizz.talk = "THROWING"
-        suc = False
-        if abs(wizz.loc[0] - self.enemy_goal) < 4000:
-            x = self.enemy_goal
-            for y in range(0, 1631, 163):
-                aim = get_aim(multiply_vector(wizz.vec, 1/0.75), (x, 3750 + y))
-                nv = self.snaffles[uid].new_vector(aim, 500)
-                col, w_uid, r, ang,cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 5, 500)
-                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                    col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 5, 500)
-                    if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                        print(f"THROW {aim[0]} {aim[1]} {force} {wizz.talk}")
-                        return
-                aim = get_aim(multiply_vector(wizz.vec, 1/0.75), (x, 3750 - y))
-                nv = self.snaffles[uid].new_vector(aim, 500)
-                col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 5, 500)
-                if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                    col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 5, 500)
-                    if not col or (ang < math.pi / 2 and ang > -1 * math.pi / 2):
-                        print(f"THROW {aim[0]} {aim[1]} {force} {wizz.talk}")
-                        return
+        if abs(wizz.loc[0] - self.enemy_goal) < 3350:
+            t, target = throw(wizz, uid, (self.enemy_goal, 3750), force)
+            if t:
+                wizz.talk = "GNITOOHS"
+                print(f"THROW {target[0]} {target[1]} {force} {wizz.talk}")
+                return
         if abs(wizz.loc[0] - self.enemy_goal)  > abs(other_wizz.loc[0] - self.enemy_goal) and check_for_pass(wizz, other_wizz, aim, uid, 2600):
             return
-        col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 5, 500)
+        col, w_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.opp_wizzs, nv, 12, force)
         if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
             # Check for other goal's locations
             print(f"CW! S{uid} & OW{w_uid} in {r}, {ang:.2f}", file = sys.stderr)
@@ -1031,15 +887,21 @@ class Match():
                 return
             if bounce_wall(wizz, uid):
                 return
+        col, b_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 12)
+        if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
+            print(f"CW! S{uid} & BL{b_uid} in {r}, {ang:.2f}", file = sys.stderr)
+            if check_for_pass(wizz, other_wizz, aim, uid, 3200):
+                return
+            if bounce_wall(wizz, uid):
+                return
+        print(f"Throw ORG: {aim}", file=sys.stderr)
+        t, target = throw(wizz, uid, (self.enemy_goal, 3750), force, 360)
+        if t:
+            print(f"Throw RNG: {aim}", file=sys.stderr)
+            wizz.talk = "MODNAR"
+            print(f"THROW {target[0]} {target[1]} {force} {wizz.talk}")
         else:
-            col, b_uid, r, ang, cv = self.snaffles[uid].check_for_collision(self.bludgers, nv, 5)
-            if col and (ang > math.pi / 2 or ang < -1 * math.pi / 2):
-                print(f"CW! S{uid} & BL{b_uid} in {r}, {ang:.2f}", file = sys.stderr)
-                if check_for_pass(wizz, other_wizz, aim, uid, 3200):
-                    return
-                if bounce_wall(wizz, uid):
-                    return
-        print(f"THROW {aim[0]} {aim[1]} {force} {wizz.talk}")
+            print(f"THROW {aim[0]} {aim[1]} {force} {wizz.talk}")
 
 my_team_id = int(input())  # if 0 you need to score on the right of the map, if 1 you need to score on the left
 
